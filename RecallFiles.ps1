@@ -24,7 +24,7 @@ if (-not $FileListPath -or -not (Test-Path $FileListPath)) {
     Show-Usage
 }
 
-# Read the file list and remove any unwanted line endings
+# Read the file list and clean up formatting
 $FileList = Get-Content -Raw $FileListPath | Out-String | ForEach-Object { $_ -replace "`r`n|`r|`n", "`n" } | Out-String
 $FileList = $FileList -split "`n" | Where-Object { $_ -match '\S' }  # Remove empty lines
 
@@ -32,13 +32,18 @@ Write-Host "`n=== Starting Recall Process ===`n"
 
 foreach ($file in $FileList) {
     # Trim spaces and remove hidden characters
-    $file = $file.Trim()
+    $file = $file.Trim('"').Trim()  # Remove leading/trailing quotes
 
     # Determine if the file is an absolute path or needs the RootFolder prepended
     if ([System.IO.Path]::IsPathRooted($file) -or $RootFolder -eq "") {
         $fullPath = $file  # File is already a full path
     } else {
         $fullPath = Join-Path -Path $RootFolder -ChildPath $file  # Use root folder
+    }
+
+    # Ensure paths with spaces are quoted properly
+    if ($fullPath -match " ") {
+        $fullPath = "`"$fullPath`""
     }
 
     if (Test-Path $fullPath) {
@@ -59,3 +64,4 @@ foreach ($file in $FileList) {
 }
 
 Write-Host "`n=== Recall Process Completed ===`n"
+
