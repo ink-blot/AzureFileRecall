@@ -1,0 +1,8 @@
+Folder1\
+Folder2\*.jpg
+Folder3\Images\*.tif
+Folder3\Images\*.png
+Folder4\*\*.mp4
+Folder5\Subfolder\Nested\*
+"C:\Absolute\Path\*"
+"\\NetworkShare\Folder\*.csv"
