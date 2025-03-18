@@ -1,77 +1,63 @@
 
 # Azure File Recall Script
 
-## 📌 Overview
-This PowerShell script triggers the recall (download) of tiered files from Azure Files using **Azure File Sync**. It scans a **file list** and attempts to download files **that exist as stubs** (tiered but not cached locally). 
+## Overview
+This PowerShell script triggers recall of tiered files from Azure File Sync to multiple specified cache servers. It can be executed from a local machine without requiring admin rights.
 
-If a file is already cached, it will be skipped. If a file is missing, a warning will be logged.
+## Features
+- **Supports multiple cache servers**: Runs the recall process on one or more specified cache servers.
+- **Handles both absolute and relative paths**: If a root folder is specified, it will prepend paths from the file list.
+- **Removes unnecessary line breaks**: Ensures compatibility with file lists containing different line endings (Windows/Linux/macOS).
+- **Provides real-time logging**: Displays recall status for each file and cache server.
 
-## 🚀 Usage
-
-### **Basic Command**
-```powershell
-powershell -File RecallFiles.ps1 -FileListPath "C:\Path\To\filelist.txt"
+## Usage
 ```
-- This checks for tiered files listed in `filelist.txt` and recalls them.
-
-### **Using a Network Share**
-```powershell
-powershell -File RecallFiles.ps1 -FileListPath "C:\Path\To\filelist.txt" -RootFolder "\\MyServer\AzureSyncShare"
-```
-- If the file list contains filenames without paths, this prepends `\\MyServer\AzureSyncShare\` to each file.
-
-### **Using a Mapped Drive**
-```powershell
-net use Z: \\MyServer\AzureSyncShare
-powershell -File RecallFiles.ps1 -FileListPath "C:\Path\To\filelist.txt" -RootFolder "Z:\"
+powershell -File RecallFiles.ps1 -FileListPath "C:\Path\To\filelist.txt" -CacheServers "Server1","Server2" [-RootFolder "\\Network\Share"]
 ```
 
-### **Using a Network File List**
-If the file list is stored on a network share:
-```powershell
-powershell -File RecallFiles.ps1 -FileListPath "\\Server\SharedFolder\filelist.txt" -RootFolder "\\MyServer\AzureSyncShare"
+## Parameters
+| Parameter      | Description |
+|-------------- |------------|
+| `-FileListPath` | Path to the file containing filenames or full file paths. |
+| `-CacheServers` | List of cache servers where files should be recalled. |
+| `-RootFolder` | (Optional) Root directory for files (ignored if file paths are absolute). |
+
+## Examples
+### Recall files on two cache servers
 ```
-This allows `filelist.txt` to be stored centrally while recalling files from a different network share.
-
-## 📄 File List Format
-- The `filelist.txt` can contain **either filenames or full file paths**. Example:
-  ```
-  DJI_0001.JPG
-  Survey_01.TIF
-  \\MyServer\AzureSyncShare\Mapping_02.JPG
-  \\MyServer\AzureSyncShare\Thermal_01.PNG
-  ```
-
-## 🔹 How It Works
-1. Reads filenames from `filelist.txt`.
-2. If a **RootFolder** is provided, it **prepends** it to filenames (unless they are absolute paths).
-3. **If a file is tiered**, triggers recall.
-4. **If a file is already cached**, skips it.
-5. **If a file is missing**, logs a warning.
-
-## ✅ Output Messages
-| Message | Meaning |
-|---------|---------|
-| `[INFO] Tiered file detected: <filepath>` | File is a stub and will be recalled. |
-| `[INFO] Recall triggered: <filepath>` | File download was requested. |
-| `[INFO] File already cached: <filepath>` | File is already stored locally. |
-| `[WARNING] File not found: <filepath>` | File does not exist in the local cache. |
-
-## ⚠️ Requirements
-- **PowerShell** (Windows 10/11 or Windows Server)
-- **Azure File Sync** configured on the target server.
-- **Read & Write permissions** to the file share.
-
-## 📌 Example Output
+powershell -File RecallFiles.ps1 -FileListPath "C:\Users\ExampleUser\list.txt" -CacheServers "NodeA","NodeB"
 ```
-=== Starting Recall Process ===
+### Recall files with a specified root folder
+```
+powershell -File RecallFiles.ps1 -FileListPath "\\NetworkPath\list.txt" -CacheServers "ServerX","ServerY" -RootFolder "\\NetworkShare\Storage"
+```
 
-[INFO] Tiered file detected: \\MyServer\AzureSyncShare\DJI_0001.JPG
-[INFO] Recall triggered: \\MyServer\AzureSyncShare\DJI_0001.JPG
+## How It Works
+1. **Runs from your PC** and sends recall instructions to the specified cache servers.
+2. **Each cache server handles the recall operation** for tiered files.
+3. **The script triggers a recall** on tiered files without opening them.
+4. **Results are displayed per server**, showing whether each file was already cached or successfully recalled.
 
-[INFO] File already cached: \\MyServer\AzureSyncShare\Survey_01.TIF
+## Notes
+- If a file path contains spaces, the script automatically ensures proper quoting.
+- The script does not require admin rights on your PC but does need permissions to execute on the cache servers.
 
-[WARNING] File not found: \\MyServer\AzureSyncShare\missing_file.jpg
+## Troubleshooting
+### Check DFS Active Server
+If unsure which cache server is active for a file share, open **File Explorer**, right-click the folder, go to **Properties > DFS**, and click **Check Status**.
+
+### Running the Script Remotely
+If you do not have direct access to cache servers, use PowerShell Remoting:
+```
+Invoke-Command -ComputerName "ServerX" -ScriptBlock {
+    powershell -File "C:\Scripts\RecallFiles.ps1" -FileListPath "C:\Scripts\list.txt"
+}
+```
+
+## Conclusion
+This script provides an efficient way to recall tiered files across multiple Azure File Sync cache servers. It is ideal for ensuring local availability of specific files without manual intervention.
+
+
 
 === Recall Process Completed ===
 ```
