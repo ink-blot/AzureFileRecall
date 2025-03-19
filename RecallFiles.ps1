@@ -115,20 +115,55 @@ foreach ($path in $PathEntries) {
             Log-Message "[INFO] File exists: $resolvedPath"
 
             # Get file attributes
-            $fileAttributes = (Get-Item -LiteralPath $resolvedPath).Attributes
+            $fileItem = Get-Item -LiteralPath $resolvedPath
+            $fileAttributes = $fileItem.Attributes
 
-            if ($fileAttributes -match "Offline") {
+            # Decode attributes into readable format
+            $attributeNames = [System.Enum]::GetValues([System.IO.FileAttributes]) | Where-Object { ($fileAttributes -band $_) -eq $_ }
+            $attributeString = ($attributeNames -join ", ")
+
+            # Print out file attributes
+            Log-Message "[DEBUG] File attributes: $attributeString"
+
+            # Check if the Offline attribute is set
+            if ($fileAttributes -band [System.IO.FileAttributes]::Offline) {
                 Log-Message "[INFO] Tiered file detected: $resolvedPath"
-                # Trigger recall
-                $null = Get-Item -LiteralPath $resolvedPath | Select-Object -Property Length
-                Log-Message "[INFO] Recall triggered: $resolvedPath"
+
+                # Convert to a proper Windows file path
+                $fsutilPath = Convert-Path -LiteralPath $resolvedPath
+
+                # Trigger recall using fsutil
+                $fsutilCommand = "fsutil file queryfileid `"$fsutilPath`""
+                Log-Message "[DEBUG] Executing recall command: $fsutilCommand"
+
+                # Force access to trigger recall
+                $fsutilPath = Convert-Path -LiteralPath $resolvedPath
+                Log-Message "[DEBUG] Attempting recall by reading file: $fsutilPath"
+
+                # Open file in a binary stream to force recall
+                try {
+                    $stream = [System.IO.File]::OpenRead($fsutilPath)
+                    $buffer = New-Object byte[] 4096  # Read only the first 4KB (adjust if needed)
+                    $stream.Read($buffer, 0, $buffer.Length) | Out-Null
+                    $stream.Close()
+                    Log-Message "[INFO] Recall successful: $fsutilPath"
+                } catch {
+                    Log-Message "[ERROR] Recall failed for: $fsutilPath. Error: $_"
+                }
+
+
+                Log-Message "[INFO] Recall triggered: $fsutilPath"
             } else {
                 Log-Message "[INFO] File already cached: $resolvedPath"
             }
         } else {
             Log-Message "[WARNING] File not found: $fullPath"
         }
+
+
+
     }
 }
 
 Log-Message "`n=== Recall Process Completed ===`n"
+
