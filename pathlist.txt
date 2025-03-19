@@ -1,3 +1,4 @@
+*.tif
 Folder1\
 Folder2\*.jpg
 Folder3\Images\*.tif
