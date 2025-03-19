@@ -12,8 +12,6 @@ The script can be executed using **PowerShell** or **Windows CMD**. You can spec
 - A **PathList** file containing specific paths or wildcard patterns.
 - Both **RootFolder** and **PathList** together.
 
-The instructions below show the script location is 
-
 ### **1. Running with just a RootFolder (simplest usage)**
 
 This will scan all files recursively in the specified directory:
