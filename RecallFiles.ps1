@@ -1,96 +1,134 @@
 param (
     [string]$PathList,
     [string]$RootFolder = "",
-    [string[]]$CacheServers
+    [string]$LogFile = "$(Split-Path -Parent $MyInvocation.MyCommand.Definition)\RecallFiles.log"
 )
+
+# Clear the log file if it exists
+Set-Content -Path $LogFile -Value "" -ErrorAction SilentlyContinue
+
+# Function to log messages to both console and log file
+function Log-Message {
+    param ([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp] $Message"
+    Write-Host $logEntry
+    Add-Content -Path $LogFile -Value $logEntry
+}
 
 # Function to display usage information
 function Show-Usage {
-    Write-Host "`n=== Azure File Recall Script ==="
-    Write-Host "Usage:"
-    Write-Host "  powershell -File RecallFiles.ps1 -PathList 'C:\Path\To\pathlist.txt' -CacheServers 'Server1','Server2' [-RootFolder '\\Server\Share']"
-    Write-Host "`nParameters:"
-    Write-Host "  -PathList       : Path to the file containing filenames, folders, or wildcard patterns."
-    Write-Host "  -CacheServers   : List of cache servers where files should be recalled."
-    Write-Host "  -RootFolder     : (Optional) Root directory for files (ignored if file paths are absolute)."
-    Write-Host "`nExamples:"
-    Write-Host "  powershell -File RecallFiles.ps1 -PathList 'C:\Users\ExampleUser\list.txt' -CacheServers 'NodeA','NodeB'"
-    Write-Host "  powershell -File RecallFiles.ps1 -PathList '\\NetworkPath\list.txt' -CacheServers 'ServerX','ServerY' -RootFolder '\\NetworkShare\Storage'"
+    Log-Message "`n=== Azure File Recall Script ==="
+    Log-Message "Usage:"
+    Log-Message "  powershell -File RecallFiles.ps1 -PathList 'C:\Path\To\pathlist.txt' [-RootFolder '\\Server\Share'] [-LogFile 'C:\Logs\output.log']"
+    Log-Message "`nParameters:"
+    Log-Message "  -PathList       : Path to the file containing filenames, folders, or wildcard patterns."
+    Log-Message "  -RootFolder     : (Optional) Root directory for files (ignored if file paths are absolute)."
+    Log-Message "  -LogFile        : (Optional) Path to log file (default: script directory)."
+    Log-Message "`nExamples:"
+    Log-Message "  powershell -File RecallFiles.ps1 -PathList 'C:\Users\ExampleUser\list.txt'"
+    Log-Message "  powershell -File RecallFiles.ps1 -PathList '\\NetworkPath\list.txt' -RootFolder '\\NetworkShare\Storage' -LogFile 'C:\Logs\output.log'"
     exit 1
 }
 
+# Debug: Print input parameters
+Log-Message "[DEBUG] PathList: $PathList"
+Log-Message "[DEBUG] RootFolder: $RootFolder"
+Log-Message "[DEBUG] LogFile: $LogFile"
+
 # Validate input parameters
-if (-not $PathList -or -not (Test-Path $PathList)) {
-    Write-Host "[ERROR] Path list '$PathList' not found or not specified."
-    Show-Usage
+if (-not $PathList -or -not (Test-Path -LiteralPath $PathList)) {
+    if (-not $RootFolder) {
+        Log-Message "[ERROR] Either -PathList or -RootFolder must be specified."
+        Show-Usage
+    }
+    Log-Message "[INFO] No PathList provided. Using RootFolder as the path."
+    $PathEntries = @($RootFolder)  # Treat RootFolder as the path
+} else {
+    Log-Message "[INFO] Using provided PathList."
+    # Read the path list and clean up formatting
+    $PathEntries = Get-Content -Raw $PathList | Out-String | ForEach-Object { $_ -replace "`r`n|`r|`n", "`n" } | Out-String
+    $PathEntries = $PathEntries -split "`n" | Where-Object { $_ -match '\S' -and -not $_.StartsWith("#") }  # Remove empty lines & comments
 }
 
-if (-not $CacheServers) {
-    Write-Host "[ERROR] No cache servers specified."
-    Show-Usage
-}
+
 
 # Read the path list and clean up formatting
 $PathEntries = Get-Content -Raw $PathList | Out-String | ForEach-Object { $_ -replace "`r`n|`r|`n", "`n" } | Out-String
 $PathEntries = $PathEntries -split "`n" | Where-Object { $_ -match '\S' -and -not $_.StartsWith("#") }  # Remove empty lines & comments
 
-Write-Host "`n=== Starting Recall Process on Cache Servers ===`n"
+Log-Message "`n=== Starting Recall Process on Local Machine ===`n"
 
 # Function to expand folders and wildcards
 function Expand-Paths {
     param ($Path)
-    
+
     # Convert Linux-style path to Windows format
-    $Path = $Path -replace "/", "\"
+    $Path = $Path -replace "/", "\\"
 
+    # If RootFolder is specified and the path is relative, prepend it
+    if ($RootFolder -and -not [System.IO.Path]::IsPathRooted($Path)) {
+        $Path = Join-Path -Path $RootFolder -ChildPath $Path
+    }
+
+    # Debugging output
+    Log-Message "[DEBUG] Processing path: $Path"
+
+    # Separate base directory and wildcard (if present)
+    $BaseDir = [System.IO.Path]::GetDirectoryName($Path)
+    $Wildcard = [System.IO.Path]::GetFileName($Path)
+    
     # If it's a directory, get all files inside it recursively
-    if (Test-Path $Path -PathType Container) {
-        return Get-ChildItem -Path $Path -Recurse -File | Select-Object -ExpandProperty FullName
+    if (Test-Path -LiteralPath $BaseDir -PathType Container) {
+        Log-Message "[DEBUG] Expanding folder: $BaseDir"
+        return Get-ChildItem -Path (Join-Path -Path $BaseDir -ChildPath $Wildcard) -Recurse -File | Select-Object -ExpandProperty FullName   
     }
-
-    # If it's a wildcard pattern, expand matching files
-    elseif ($Path -match "\*|\?") {
-        return Get-ChildItem -Path $Path -File | Select-Object -ExpandProperty FullName
-    }
-
-    # Otherwise, return the original file path
+    
+    # If no wildcard, return the direct path
+    Log-Message "[DEBUG] Using direct path: $Path"
     return $Path
 }
 
-# Execute recall on each specified cache server
-foreach ($server in $CacheServers) {
-    Write-Host "[INFO] Executing recall process on: $server"
+foreach ($path in $PathEntries) {
+    $path = $path.Trim('"').Trim()  # Remove leading/trailing quotes
+    
+    # Expand folders and wildcards into actual file paths
+    $ExpandedFiles = Expand-Paths -Path $path
 
-    foreach ($path in $PathEntries) {
-        $path = $path.Trim('"').Trim()  # Remove leading/trailing quotes
-        
-        # Expand folders and wildcards into actual file paths
-        $ExpandedFiles = Expand-Paths -Path $path
+    foreach ($fullPath in $ExpandedFiles) {
 
-        foreach ($fullPath in $ExpandedFiles) {
-            # Ensure paths with spaces are quoted properly
-            if ($fullPath -match " ") {
-                $fullPath = "`"$fullPath`""
-            }
+        # Convert to an absolute path
+        $fullPath = [System.IO.Path]::GetFullPath($fullPath)
 
-            if (Test-Path $fullPath) {
-                # Get file attributes
-                $fileAttributes = (Get-Item $fullPath).Attributes
+        # Convert to long UNC path format if it exceeds 260 characters
+        if ($fullPath.Length -ge 260) {
+            $fullPath = '\\\\?\\UNC' + $fullPath.Substring(1)
+        }
 
-                if ($fileAttributes -match "Offline") {
-                    Write-Host "[INFO] Tiered file detected on $server: $fullPath"
-                    # Trigger recall
-                    $null = Get-Item $fullPath | Select-Object -Property Length
-                    Write-Host "[INFO] Recall triggered on $server: $fullPath"
-                } else {
-                    Write-Host "[INFO] File already cached on $server: $fullPath"
-                }
+        # Debugging output
+        Log-Message "[DEBUG] Checking file: $fullPath"
+
+        # Use Resolve-Path before Test-Path to prevent false negatives
+        $resolvedPath = Resolve-Path -LiteralPath $fullPath -ErrorAction SilentlyContinue
+
+        if ($resolvedPath) {
+            Log-Message "[INFO] File exists: $resolvedPath"
+
+            # Get file attributes
+            $fileAttributes = (Get-Item -LiteralPath $resolvedPath).Attributes
+
+            if ($fileAttributes -match "Offline") {
+                Log-Message "[INFO] Tiered file detected: $resolvedPath"
+                # Trigger recall
+                $null = Get-Item -LiteralPath $resolvedPath | Select-Object -Property Length
+                Log-Message "[INFO] Recall triggered: $resolvedPath"
             } else {
-                Write-Host "[WARNING] File not found on $server: $fullPath"
+                Log-Message "[INFO] File already cached: $resolvedPath"
             }
+        } else {
+            Log-Message "[WARNING] File not found: $fullPath"
         }
     }
 }
 
-Write-Host "`n=== Recall Process Completed Across All Servers ===`n"
-
+Log-Message "`n=== Recall Process Completed ===`n"
