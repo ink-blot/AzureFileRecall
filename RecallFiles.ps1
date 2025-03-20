@@ -125,37 +125,61 @@ foreach ($path in $PathEntries) {
             # Print out file attributes
             Log-Message "[DEBUG] File attributes: $attributeString"
 
-            # Check if the Offline attribute is set
             if ($fileAttributes -band [System.IO.FileAttributes]::Offline) {
                 Log-Message "[INFO] Tiered file detected: $resolvedPath"
 
                 # Convert to a proper Windows file path
                 $fsutilPath = Convert-Path -LiteralPath $resolvedPath
 
-                # Trigger recall using fsutil
-                $fsutilCommand = "fsutil file queryfileid `"$fsutilPath`""
-                Log-Message "[DEBUG] Executing recall command: $fsutilCommand"
-
-                # Force access to trigger recall
-                $fsutilPath = Convert-Path -LiteralPath $resolvedPath
+                # Trigger recall using a partial read
                 Log-Message "[DEBUG] Attempting recall by reading file: $fsutilPath"
 
-                # Open file in a binary stream to force recall
                 try {
                     $stream = [System.IO.File]::OpenRead($fsutilPath)
-                    $buffer = New-Object byte[] 4096  # Read only the first 4KB (adjust if needed)
+                    $buffer = New-Object byte[] 8192  # Read first 8KB instead of 4KB
+                    #$buffer = New-Object byte[] $stream.Length  # Read full file size #Read full file
                     $stream.Read($buffer, 0, $buffer.Length) | Out-Null
                     $stream.Close()
-                    Log-Message "[INFO] Recall successful: $fsutilPath"
+
+                    Log-Message "[INFO] Recall initiated: $fsutilPath"
                 } catch {
                     Log-Message "[ERROR] Recall failed for: $fsutilPath. Error: $_"
                 }
 
+                # Wait for file to fully recall
+                $timeout = 300  # Max wait time in seconds (5 minutes)
+                $elapsed = 0
 
-                Log-Message "[INFO] Recall triggered: $fsutilPath"
+                while ($true) {
+                    Start-Sleep -Seconds 10  # Add a delay between checks
+                    $fileItem = Get-Item -LiteralPath $resolvedPath
+                    $fileAttributes = $fileItem.Attributes
+                    $attributeNames = [System.Enum]::GetValues([System.IO.FileAttributes]) | Where-Object { ($fileAttributes -band $_) -eq $_ }
+                    $attributeString = ($attributeNames -join ", ")
+                    
+                    Log-Message "[DEBUG] Checking recall status: $attributeString"
+
+                    if ($fileAttributes -band [System.IO.FileAttributes]::Offline) {
+                        Log-Message "[DEBUG] File still offline, waiting..."
+                    } else {
+                        Log-Message "[INFO] File successfully recalled: $fsutilPath"
+                        break
+                    }
+
+                    $elapsed += 2  # Since we're sleeping for 2 seconds per iteration
+                    if ($elapsed -ge $timeout) {
+                        Log-Message "[WARNING] File recall timeout: $fsutilPath"
+                        break
+                    }
+                }
+
+                # Small delay before moving to next file (prevents throttling)
+                Start-Sleep -Milliseconds 500
             } else {
                 Log-Message "[INFO] File already cached: $resolvedPath"
             }
+
+
         } else {
             Log-Message "[WARNING] File not found: $fullPath"
         }
@@ -166,4 +190,5 @@ foreach ($path in $PathEntries) {
 }
 
 Log-Message "`n=== Recall Process Completed ===`n"
+
 
